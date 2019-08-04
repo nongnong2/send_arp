@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <pcap.h>
+#include <pcap/pcap.h>
 #include <net/if.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -10,15 +11,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-void print_ip(uint32_t ip){
-    printf("%d.%d.%d.%d\n",
-           (ntohl(ip) & 0xFF000000) >> 24,
-           (ntohl(ip) & 0x00FF0000) >> 16,
-           (ntohl(ip) & 0x0000FF00) >> 8,
-           (ntohl(ip) & 0x000000FF)
-           );
-}
-
 typedef struct ARP_HEADER{
     uint16_t HardwareType; //if Ethernet it is 0x0001
     uint16_t ProtocolType; //if IPv4, it is 0x0800
@@ -26,9 +18,9 @@ typedef struct ARP_HEADER{
     uint8_t IPAddLength;   //define length of IP(IPv4 is 4byte)
     uint16_t OPcode;       //ARP Request == 0x0001, ARP Reply == 0x0002
     uint8_t SenderHwAdd[6]; //Sender's Mac
-    uint32_t SenderIPAdd;    //Sender's IP
+    uint8_t SenderIPAdd[4];    //Sender's IP
     uint8_t TargetHwAdd[6]; //Target Mac
-    uint32_t TargetIPAdd;    //Target IP
+    uint8_t TargetIPAdd[4];    //Target IP
 }ARP_HEADER;
 
 typedef struct Ethernet{
@@ -49,6 +41,7 @@ int main()
 {
     ARP_PACKET arp_bc_packet;
     char device[100];
+    char errbuf[100];
     uint8_t Mymacaddress[6];
 //    uint8_t MyIP[4];
 //    uint8_t TargetIP[20];
@@ -59,7 +52,7 @@ int main()
     int sock;
     struct ifreq ifr; //#include <net/if.h>
     struct sockaddr_in *sin; // 16byte, sa_family(2 byte): it divide type of address, sa_data(14byte): save real address
-
+    u_char flush[50];
     sock = socket(AF_INET, SOCK_STREAM, 0); //int socket(int domain, int type, int protocol);
     if(sock < 0){
         printf("It is error!");
@@ -74,32 +67,46 @@ int main()
         return 0;
     }
 
-    memcpy(Mymacaddress,ifr.ifr_hwaddr.sa_data, 6); // 08:00:27:00:67:41
+    memcpy(Mymacaddress,ifr.ifr_hwaddr.sa_data, 6); //  my mac 08:00:27:00:67:41
     memset(TargetMac, 0xFF, 6);
 
     //ARP REQUEST#1 : make ethernet header & ARP header
     struct Ethernet bcEth;
-    memcpy(bcEth.dst_mac, Mymacaddress, 6);
-    memcpy(bcEth.src_mac, TargetMac, 6);
+    memcpy(bcEth.src_mac, Mymacaddress, 6);
+    memcpy(bcEth.dst_mac, TargetMac, 6);
+
     bcEth.type = htons(0x0806);
 
     //ARP Header
-    struct ARP_HEADER bcARP;
-    bcARP.HardwareType = htons(0x0001);
-    bcARP.ProtocolType = htons(0x800);
-    bcARP.HwAddLength = 0x06;
-    bcARP.IPAddLength = 0x04;
-    bcARP.OPcode = htons(0x0001); //ARP Request
-    memcpy(bcARP.SenderHwAdd, Mymacaddress, 6);
-    bcARP.SenderIPAdd = ntohl(0xc0a80129); //Sender IP is 192.168.1.41 0xc0a80129
-    memset(bcARP.TargetHwAdd, 0, 6);
-    bcARP.TargetIPAdd = ntohl(0xc0a802c4); //targetip is 192.168.2.196 0xc0a802c4
+    struct ARP_HEADER ARP_request;
+    ARP_request.HardwareType = htons(0x0001);
+    ARP_request.ProtocolType = htons(0x800);
+    ARP_request.HwAddLength = 0x06;
+    ARP_request.IPAddLength = 0x04;
+    ARP_request.OPcode = htons(0x0001); //ARP Request
+    memcpy(ARP_request.SenderHwAdd, Mymacaddress, 6);
+    //Sender IP is 192.168.1.41 0xc0a80129
+    uint32_t s = ntohl(0xc0a80102);
+    memcpy(ARP_request.SenderIPAdd, &s, 4);
+    memset(ARP_request.TargetHwAdd, 0x00, 6);
+    s = ntohl(0xc0a800fe); //targetip is 192.168.2.196 0xc0a802c4
+    memcpy(ARP_request.TargetIPAdd, &s, 4);
+    memcpy(&arp_bc_packet.eth_hdr, &bcEth, sizeof(Ethernet));
+    memcpy(&arp_bc_packet.arp_hdr, &ARP_request, sizeof(ARP_HEADER));
 
+    memcpy(flush, &arp_bc_packet, sizeof(ARP_PACKET));
 
-    memcpy(&arp_bc_packet.arp_hdr, &bcEth, sizeof(Ethernet));
+    for (int i = 0; sizeof(ARP_PACKET) > i; i++) {
+        if(i == 0 ){
+            printf("%02x ",flush[i]);
+            continue;
+        }
+        if(i % 15 == 0)printf("\n");
+        printf("%02x ",flush[i]);
+    }
 
-
-
+    pcap_t* handle = pcap_open_live(device, 1000, 1, 1000, errbuf);
+    pcap_inject(handle, (u_char*)flush, sizeof(flush));
 
 
 
