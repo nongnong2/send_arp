@@ -6,3 +6,6 @@ CONFIG -= qt
 SOURCES += \
         main.cpp
 LIBS+=-lpcap
+
+HEADERS += \
+    send_arp.h
