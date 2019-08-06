@@ -11,47 +11,40 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <ifaddrs.h>
+#include <unistd.h>
 #include "send_arp.h"
 
 struct ARP_PACKET{
-    struct arp_header;
-    struct arp_payload;
-    struct ethernet_header;
+    struct ethernet_header ether_h;
+    struct arp_header arp_h;
+    struct arp_payload arp_py;
 };
 
-void getMymac(uint8_t *mac_address){
-    struct ifreq ifr;
-    struct ifconf ifc;
-    char buf[1024];
-    int success = 0;
+void my_info_setting(char *dev, uint8_t *ipstr, uint8_t *macstr){
 
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock == -1) { /* handle error*/ };
+    ifreq ifr;
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    strncpy(ifr.ifr_name, dev, IFNAMSIZ);
 
-    ifc.ifc_len = sizeof(buf);
-    ifc.ifc_buf = buf;
-    if (ioctl(sock, SIOCGIFCONF, &ifc) == -1) { /* handle error */ }
+    ioctl(s, SIOCGIFHWADDR, &ifr);
+    memcpy((char *)macstr, ifr.ifr_hwaddr.sa_data, 48);
 
-    struct ifreq* it = ifc.ifc_req;
-    const struct ifreq* const end = it + (ifc.ifc_len / sizeof(struct ifreq));
-
-    for (; it != end; ++it) {
-        strcpy(ifr.ifr_name, it->ifr_name);
-        if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
-            if (! (ifr.ifr_flags & IFF_LOOPBACK)) { // don't count loopback
-                if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
-                    success = 1;
-                    break;
-                }
-            }
-        }
-        else { /* handle error */ }
-    }
-
-    if (success) memcpy(mac_address, ifr.ifr_hwaddr.sa_data, 6);
+    ioctl(s, SIOCGIFADDR, &ifr);
+    memcpy((char *)ipstr, ifr.ifr_addr.sa_data+2, 32);
 }
 
+void ip_change(char * ip, uint8_t * unchanged_ip){
 
+    char * a = strtok(ip, ".");
+    char * b = strtok(NULL, ".");
+    char * c = strtok(NULL, ".");
+    char * d = strtok(NULL, ".");
+    unchanged_ip[0] = (uint8_t)atoi(a);
+    unchanged_ip[1] = (uint8_t)atoi(b);
+    unchanged_ip[2] = (uint8_t)atoi(c);
+    unchanged_ip[3] = (uint8_t)atoi(d);
+}
 
 void makeETH_request(struct ethernet_header *eth, uint8_t *mymac){
     uint8_t eth_dmac_broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; //broadcast
@@ -60,7 +53,7 @@ void makeETH_request(struct ethernet_header *eth, uint8_t *mymac){
     memcpy(eth_tmac, mymac, 6); //mymac is sendermac
     memcpy(eth->ether_shost, eth_tmac, sizeof(eth_tmac)); //targetmac is 0x00 * 6
     eth->ether_type = htons(0x0806); //ARP type == 0x0806
-}// 14byte
+}
 
 void makeARP_header(struct arp_header *arph, uint16_t opcode){
     arph->arp_hw_type = htons(0x0001); //define type of net, ethernet is 0x0001
@@ -69,32 +62,13 @@ void makeARP_header(struct arp_header *arph, uint16_t opcode){
     arph->arp_protocol_size = 0x4; // length of ip is 4;
     arph->arp_opcode =htons(opcode); //ARP_request == 0x0001, ARP_reply ==0x0002
 }
-
-void makeARP_request_payload(struct arp_payload *apl, uint8_t *sendermac, char *senderip, char *targetIP){
-    in_addr ip_addr; //in_addr changes str ip to ip which has long type
-    int32_t sender_ip_arp;
-    int32_t target_ip_arp;
-
-    memcpy(apl->sender_mac, sendermac, sizeof (sendermac)); //in ARP sendermac is my mac
-    inet_aton(senderip, &ip_addr); // change string ip to long type ip
-    sender_ip_arp = ip_addr.s_addr;
-    sender_ip_arp = ip_addr.s_addr;
-    memcpy(apl->sender_ip, &sender_ip_arp, 4);// In ARP sender ip is my ip
-    // In ARP_request, sender doesn't know target mac
-    memset(apl->target_mac, 0, 6);
-    inet_aton(targetIP, &ip_addr);
-    target_ip_arp = ip_addr.s_addr;
-    memcpy(apl->target_ip, &target_ip_arp, 4); //define target ip
-}//arp protocol find mac use ip(sender can find target's mac by using ARP protocol with target's IP)
+//arp protocol find mac use ip(sender can find target's mac by using ARP protocol with target's IP)
 //define sender mac, ip / target mac, ip
-
-int main()
+int main(int argc, char* argv[])
 {
     char device[20];
-    uint8_t senderIP[4] = {0xc0,0xa8, 0x01, 0x0b}; //my ip 192.168.1.11
-    uint8_t targetIP[4] = {0xc0,0xa8,0x00,0xfe}; //192.168.0.253
-    uint8_t mymac[6] = {0x08,0x00,0x27,0xa1,0x1a,0x2c};
-    u_char flush[42] = {0};
+    uint8_t mymac[6];
+    u_char flush[42];
     char errbuf[1000];
 
     struct ethernet_header eth;
@@ -102,32 +76,67 @@ int main()
     struct arp_payload arpl;
     struct ARP_PACKET arp_packet;
 
+    //make normal packet
+    char *dev = argv[1];
+    uint8_t ipstr[4];
+    uint8_t targetIP[4];
+    uint8_t macstr[6];
+    my_info_setting(dev, ipstr, macstr);
+    ip_change(argv[2], targetIP);
+
+
     //input ethernet header
-    makeETH_request(&eth, mymac);
+    makeETH_request(&eth, macstr);
     memcpy(flush, &eth, sizeof (ethernet_header));
     //input arp header
     makeARP_header(&arh, ARPOP_REQUEST);
-    memcpy(&flush[14], &arh, sizeof (arp_header));  
-    memcpy(&flush[22], mymac, 6);
-    memcpy(&flush[28], senderIP, 4);
+    memcpy(&flush[14], &arh, sizeof (arp_header));
+    memcpy(&flush[22], macstr, 6);
+    memcpy(&flush[28], ipstr, 4);
+    memcpy(&flush[32], "\x00\x00\x00\x00\x00\x00", 6);
     mempcpy(&flush[38], targetIP, 4);
     //input arp_payload
-
-
     for(int i = 1; sizeof(flush) >= i; i++){
         printf("%02X ", flush[i - 1]);
         if(i % 16 == 0){
             printf("\n");
         }
     }
+
     printf("End!\n!");
-    pcap_t* handle = pcap_open_live("enp0s3",1000,1,1000,errbuf);
-    pcap_inject(handle, (u_char*)flush, sizeof(flush));
+    while(true){
+        pcap_t* handle = pcap_open_live("wlan0",1000,1,1000,errbuf);
+        pcap_inject(handle, (u_char*)flush, sizeof(flush));
+        struct pcap_pkthdr* header;
+        const u_char* packet; //packet is storage of reply
+        int res = pcap_next_ex(handle, &header, &packet);
+        struct ARP_PACKET *arp_reply;
+        //it is reply packet?(opcode is in arp_header)
+        arp_reply = (struct ARP_PACKET*)packet;
+        if (ntohs(arp_reply->arp_h.arp_opcode) != ARPOP_REPLY){
+            printf("error!!\n");
+            continue;
+        }
+        //if it is reply_packet
+        else {
+            printf("it is ARP_PEPLY PACKET!!!!\n");
+            arp_reply->ether_h.ether_shost;
+            //now sender(attacker) will use gateway IP, and victim's mac(allocate to dst mac)
+            uint8_t gatewayip[4];
+            ip_change(argv[3], gatewayip);
+            struct ARP_PACKET *arp_reply_reply;
+            arp_reply_reply = (struct ARP_PACKET*)packet;
+            //change sender ip to gateway
+            arp_reply_reply->arp_py.sender_ip = gatewayip;
+            //target mac is victim's mac
+            arp_reply_reply->arp_py.target_mac = arp_reply->ether_h.ether_shost;
+            //sender mac is mymac
 
 
-//    for(int i = 0; sizeof(flush) > i; i++){
-//        printf("02X", flush[i]);
-//        if(i % 15 == 0){printf("\n");}
-//    }
+        }
+    }
+
 
 }
+
+
