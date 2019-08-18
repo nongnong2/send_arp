@@ -18,8 +18,8 @@ struct arp_header{
 struct arp_payload{
     uint8_t sender_mac[6];
     uint8_t sender_ip[4];
-    uint8_t target_mac[6];
-    uint8_t target_ip[4];
+    uint8_t receiver_mac[6];
+    uint8_t receiver_ip[4];
 };
 
 struct ethernet_header{

