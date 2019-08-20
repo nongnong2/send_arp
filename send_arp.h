@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 
 #endif // SEND_ARP_H
+#pragma pack(1)
 struct arp_header{
     uint16_t arp_hw_type;
     uint16_t arp_protocol;
@@ -27,6 +28,8 @@ struct ethernet_header{
     uint8_t ether_shost[6];
     uint16_t ether_type;
 };
+#pragma pack(1)
+
 
 
 
