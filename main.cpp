@@ -109,7 +109,6 @@ int main(int argc, char* argv[])
             printf("\n");
         }
     }
-    ip_change(argv[3], targetip);
     while(true){
         pcap_t* handle = pcap_open_live(argv[1],1000,1,1000,errbuf);
         pcap_inject(handle, (u_char*)flush, sizeof(flush));
