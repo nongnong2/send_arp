@@ -4,8 +4,9 @@ CONFIG -= app_bundle
 CONFIG -= qt
 
 SOURCES += \
+        arp.cpp \
         main.cpp
-LIBS+=-lpcap
+LIBS+=-lpcap -lpthread
 
 HEADERS += \
     send_arp.h
